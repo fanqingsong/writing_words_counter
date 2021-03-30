@@ -3,10 +3,12 @@
 # !pip install shapely -i https://pypi.tuna.tsinghua.edu.cn/simple #该Module依赖于第三方库shapely，使用该Module之前，请先安装shapely
 # !pip install pyclipper -i https://pypi.tuna.tsinghua.edu.cn/simple #该Module依赖于第三方库pyclipper，使用该Module之前，请先安装pyclipper
 #
-
+import os
+import time
 
 import paddlehub as hub
-import cv2
+import cv2 as cv
+import shutil
 
 
 class WordsCounter:
@@ -15,10 +17,20 @@ class WordsCounter:
         self._workspace_path = "./workspace"
         self._snapshot_path = f"{self._workspace_path}/snapshot"
 
-    def _get_ocr_results_from_image(self, image_path):
-        img_data = cv2.imread(image_path)
+    def _get_image_data(self, image_path):
+        image_data = cv.imread(image_path)
 
-        ocr_results = self._ocr.recognize_text(images=[img_data])
+        print(type(image_data))
+        print(f"image_data.shape={image_data.shape}")
+
+        return image_data
+
+    def _get_ocr_results_from_image_data(self, image_data):
+        if image_data is None:
+            print("image_data is none")
+            return []
+
+        ocr_results = self._ocr.recognize_text(images=[image_data])
         print(ocr_results)
 
         return ocr_results
@@ -49,7 +61,9 @@ class WordsCounter:
         return len(pure_text)
 
     def count_words_for_one_image(self, image_path):
-        ocr_results = self._get_ocr_results_from_image(image_path)
+        image_data = self._get_image_data(image_path)
+
+        ocr_results = self._get_ocr_results_from_image_data(image_data)
 
         text = self._get_text_from_ocr_results(ocr_results)
 
@@ -59,37 +73,70 @@ class WordsCounter:
 
         return num
 
+    def _prepare_for_watch(self):
+        if not os.path.exists(self._snapshot_path):
+            os.mkdir(self._snapshot_path)
+
+        #shutil.rmtree(self._snapshot_path)
+
     def watch_camera(self):
-        cap = cv2.VideoCapture(0)
+        self._prepare_for_watch()
+
+        cap = cv.VideoCapture(0)
+
+        fps = cap.get(cv.CAP_PROP_FPS)  # 视频平均帧率
+        print(f"fps = {fps}")
 
         index = 0
         while True:
             ret, frame = cap.read()
-            print(f"capture ret={ret} frame={frame}")
 
-            if ret:
-                cv2.imwrite(f'{self._snapshot_path}/{index}.jpg', frame)
-                print(type(frame))
-                print(frame.shape)
-                index += 1
-            else:
+            if not ret:
+                print(f"capture failed with ret={ret} frame={frame}")
                 break
 
+            ocr_results = self._get_ocr_results_from_image_data(frame)
+
+            text = self._get_text_from_ocr_results(ocr_results)
+
+            num = self._count_words_in_text(text)
+
+            cv.putText(frame, f"Words total = {num}", (50, 50),
+                        cv.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255),
+                        2)
+
+            cv.imshow('Video', frame)
+
+            image_path = f'{self._snapshot_path}/{index}.jpg'
+            cv.imwrite(image_path, frame)
+
+            index += 1
+
+            # 键盘输入空格暂停，输入q退出
+            key = cv.waitKey(1) & 0xff
+            if key == ord(" "):
+                cv.waitKey(0)
+            if key == ord("q"):
+                break
+
+            time.sleep(1 / fps)  # 按原帧率播放
+
         cap.release()
-        print('video split finish, all %d frame' % index)
+        cv.destroyAllWindows()
+        print('capture finish, get %d frame' % index)
 
 
 
 
 if __name__ == "__main__":
-    # for test
-    one_writing_path = './workspace/one_student_writing.jpeg'
-
     words_counter = WordsCounter()
-    #words_counter.watch_camera()
 
-    #
-    words_counter.count_words_for_one_image(one_writing_path)
+    # realtime counting
+    words_counter.watch_camera()
+
+    # testing one picture
+    one_writing_path = './workspace/one_student_writing.jpeg'
+    # words_counter.count_words_for_one_image(one_writing_path)
 
 
 
